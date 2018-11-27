@@ -269,6 +269,8 @@ class Autoscale
   end
 
   def update_current_marathon_instances
+    v2_app_path = @options.marathon.path + '/v2/apps'
+    req = Net::HTTP::Get.new(v2_app_path.gsub('//','/'))
     req = Net::HTTP::Get.new('/v2/apps')
     if !@options.marathonCredentials.empty?
       req.basic_auth @options.marathonCredentials[0], @options.marathonCredentials[1]
