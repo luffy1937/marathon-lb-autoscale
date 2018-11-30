@@ -146,6 +146,7 @@ class Autoscale
 
     @apps = {}
     @options.apps.each do |app|
+      puts "APPNAME",app
       @apps[app] = {
         :rate => [],
         :rate_avg => 0,
@@ -154,6 +155,8 @@ class Autoscale
         :intervals_past_threshold => 0,
         :current_instances => 0,
         :target_instances => 0,
+        # ID in marathon
+        :service_id => "default",
       }
     end
 
@@ -213,7 +216,9 @@ class Autoscale
     samples = csv.map do |line|
       line.split(/,/)
     end.select do |line|
-      line[1].match('FRONTEND')
+      #line[1].match('FRONTEND')
+      #BACKEND instead of FRONTEND
+      line[1].match('BACKEND')
     end
 
     frontends = {}
@@ -233,12 +238,10 @@ class Autoscale
     if !@options.haproxyCredentials.empty?
       req.basic_auth @options.haproxyCredentials[0], @options.haproxyCredentials[1]
     end
-
     res = Net::HTTP.new(haproxy.host,
                         haproxy.port).start do |http|
       http.request(req)
     end
-
     csv = res.body.split(/\r?\n/)
 
     header_labels = parse_haproxy_header_labels(csv)
@@ -269,9 +272,9 @@ class Autoscale
   end
 
   def update_current_marathon_instances
-    v2_app_path = @options.marathon.path + '/v2/apps'
-    req = Net::HTTP::Get.new(v2_app_path.gsub('//','/'))
-    req = Net::HTTP::Get.new('/v2/apps')
+  	#adeapt to multi marathon
+    v2_apps_path = (@options.marathon.path + '/v2/apps').gsub('//', '/')
+    req = Net::HTTP::Get.new(v2_apps_path)
     if !@options.marathonCredentials.empty?
       req.basic_auth @options.marathonCredentials[0], @options.marathonCredentials[1]
     end
@@ -282,16 +285,36 @@ class Autoscale
     }
     apps = JSON.parse(res.body)
 
-    instances = {}
+    #instances = {}
+    #apps['apps'].each do |app|
+    #  id = app['id'][1..-1].gsub '/', '_' # trim leading '/'  # gsub add support for folders
+    #  instances[id] = app['instances']
+    #end
+
+
+    #{HAPROXY_DEPLOYMENT_GROUP}_{Service Port} is equal to "pxname" of /haproxy?stats;csv
+    id_instances = {}
     apps['apps'].each do |app|
-      id = app['id'][1..-1].gsub '/', '_' # trim leading '/'  # gsub add support for folders
-      instances[id] = app['instances']
+     begin
+      id = app['labels']['HAPROXY_DEPLOYMENT_GROUP']
+      if app['container']['docker']['portMappings'].size > 0
+        service_port = app['container']['docker']['portMappings'][0]['servicePort']
+        #number of instances  and  ID in marathon
+        id_instances[id + "_" +  service_port.to_s] = {"instances" => app['instances'], "service_id" => app['id']}
+      end
+     rescue
+      #puts app['id']
+     end
     end
+
     # Find our app backends
     @apps.each do |app,data|
-      app_id = app.match(/(.*)_\d+$/)[1]
-      if instances.has_key?(app_id)
-        data[:current_instances] = instances[app_id]
+      #app_id = app.match(/(.*)_\d+$/)[1]
+      app_id = app
+      #if instances.has_key?(app_id)
+      if id_instances.has_key?(app_id)
+        data[:current_instances] = id_instances[app_id]['instances']
+        data[:service_id] = id_instances[app_id]['service_id']
       end
     end
   end
@@ -312,8 +335,11 @@ class Autoscale
   def build_scaling_list
     to_scale = {}
     @apps.each do |app,data|
-      app_id = app.match(/(.*)_\d+$/)[1]
-      app_id = app_id.dup.gsub '_', '/' # support for folders.
+      #app_id = app.match(/(.*)_\d+$/)[1]
+      #app_id = app_id.dup.gsub '_', '/' # support for folders.
+
+      # ID in marathon
+      app_id = data[:service_id]
 
       # Scale if: the target and current instances don't match, we've exceed the
       # threshold difference, and a scale operation wasn't performed recently
@@ -353,8 +379,10 @@ class Autoscale
   end
 
   def scale_apps(scale_list)
+  	#adeapt to multi marathon
+    v2_apps_path = (@options.marathon.path + '/v2/apps/').gsub('//', '/')
     scale_list.each do |app,instances|
-      req = Net::HTTP::Put.new('/v2/apps/' + app)
+      req = Net::HTTP::Put.new(v2_apps_path + app)
       if !@options.marathonCredentials.empty?
         req.basic_auth(@options.marathonCredentials[0],
                        @options.marathonCredentials[1])
