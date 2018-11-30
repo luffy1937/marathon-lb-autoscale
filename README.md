@@ -45,7 +45,7 @@ Common options:
 {
   "id": "marathon-lb-autoscale",
   "args":[
-    "--marathon", "http://leader.mesos:8080",
+    "--marathon", "http://leader.mesos/service/marathon:8080",
     "--haproxy", "http://marathon-lb.marathon.mesos:9090",
     "--apps", "nginx_10000"
   ],
@@ -55,7 +55,7 @@ Common options:
   "container": {
     "type": "DOCKER",
     "docker": {
-      "image": "mesosphere/marathon-lb-autoscale",
+      "image": "build yourself",
       "network": "HOST",
       "forcePullImage": true
     }
